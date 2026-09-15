@@ -1,11 +1,19 @@
 # Store downloads and diagnostics
 
 `StoreDownloadService` uses `volumeStoreDownloadProduct` first. It tries the
-redownload endpoint once for failure 5002, or a missing/empty songList with no
-failure code, customer message, account dialog or action. Other rejections and
-transport errors are surfaced without this fallback. Numeric failure codes and
-`metrics.messageCode` are recognized, and Apple's customer messages are preserved
-in the error UI. License-required responses still use the explicit acquisition UI.
+redownload endpoint once for failure 5002, a missing/empty songList, or a
+"No Longer Available" availability message, with no failure code, account
+dialog or action present. When the redownload stays empty — including its
+empty HTTP 500 response — an iOS request (iPhone or iPad) draws the
+`updateProduct` endpoint exactly once with the already resolved version.
+Other rejections and transport errors are surfaced without this fallback.
+Numeric failure codes and `metrics.messageCode` are recognized, and Apple's
+customer messages are preserved in the error UI. License-required responses
+still use the explicit acquisition UI. This mirrors the recovery chain of
+[ipatool pull 554](https://github.com/majd/ipatool/pull/554): redownload
+covers empty and unavailable volume responses, update covers the remaining
+empty redownload failures, and the update response must be a single item
+matching the requested app, bundle and version.
 
 Before an unversioned fallback, the catalog resolves the current external version
 ID for the selected platform and account's storefront. This asks redownload
@@ -26,9 +34,10 @@ logged. ApplePackage verbose logging stays disabled.
 bash Resources/Scripts/check.downloads.sh
 ```
 
-These checks exercise primary success, a single empty/5002 fallback, pinned
-history, failed catalog resolution, explicit errors and dialogs, response
-redaction, endpoint-specific version keys, and credential redirect restrictions.
+These checks exercise primary success, single-empty and 5002 fallbacks, the
+iOS-only update hop, pinned history, failed catalog resolution, explicit
+errors and dialogs, response redaction, endpoint-specific version keys, and
+credential redirect restrictions.
 The same checks run in a dedicated pull request workflow. Real account downloads
 remain necessary to verify Apple's current behavior for any particular app.
 

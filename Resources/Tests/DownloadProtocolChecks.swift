@@ -7,7 +7,7 @@ struct DownloadProtocolChecks {
         let success: [String: Any] = ["songList": [["metadata": ["softwareVersionBundleId": "example.app"]]]]
         var requests: [(StoreDownloadProtocol.Endpoint, String?)] = []
         var lookups = 0
-        let result = try await StoreDownloadProtocol.fetchWithFallback(version: nil) { endpoint, version in
+        let result = try await StoreDownloadProtocol.fetchWithFallback(platformIsIOS: false, version: nil) { endpoint, version in
             requests.append((endpoint, version))
             return endpoint == .volumeStore ? empty : success
         } resolveVersion: {
@@ -16,11 +16,11 @@ struct DownloadProtocolChecks {
         } onFallback: { precondition($0 == "empty-songList") }
         precondition(requests.count == 2 && requests[0].0 == .volumeStore && requests[0].1 == nil)
         precondition(requests[1].0 == .redownload && requests[1].1 == "890598805" && lookups == 1)
-        _ = try StoreDownloadProtocol.packageItem(result, bundleID: "example.app")
+        _ = try StoreDownloadProtocol.packageItem(result.response, bundleID: "example.app")
 
         // Preserve historical IDs on both endpoints; numeric 5002 is retryable.
         requests = []
-        _ = try await StoreDownloadProtocol.fetchWithFallback(version: "12345") { endpoint, version in
+        _ = try await StoreDownloadProtocol.fetchWithFallback(platformIsIOS: false, version: "12345") { endpoint, version in
             requests.append((endpoint, version))
             return endpoint == .volumeStore ? ["failureType": 5002] : success
         } resolveVersion: { fatalError("Replaced the requested historical version") }
@@ -30,7 +30,7 @@ struct DownloadProtocolChecks {
         // A catalog failure never issues an unpinned fallback request.
         requests = []
         do {
-            _ = try await StoreDownloadProtocol.fetchWithFallback(version: nil) { endpoint, version in
+            _ = try await StoreDownloadProtocol.fetchWithFallback(platformIsIOS: false, version: nil) { endpoint, version in
                 requests.append((endpoint, version))
                 return empty
             } resolveVersion: { throw StoreDownloadError.catalogUnavailable } onFallback: { _ in }
@@ -46,7 +46,7 @@ struct DownloadProtocolChecks {
                          ["status": -1], ["songList": "malformed"]]
         {
             requests = []
-            _ = try await StoreDownloadProtocol.fetchWithFallback(version: nil) { endpoint, version in
+            _ = try await StoreDownloadProtocol.fetchWithFallback(platformIsIOS: false, version: nil) { endpoint, version in
                 requests.append((endpoint, version))
                 return response
             } resolveVersion: { fatalError("Unexpected catalog request") }
@@ -56,13 +56,13 @@ struct DownloadProtocolChecks {
 
         // Even when both endpoints are empty, there is no retry loop.
         requests = []
-        let stillEmpty = try await StoreDownloadProtocol.fetchWithFallback(version: "123") { endpoint, version in
+        let stillEmpty = try await StoreDownloadProtocol.fetchWithFallback(platformIsIOS: false, version: "123") { endpoint, version in
             requests.append((endpoint, version))
             return empty
         } resolveVersion: { fatalError("Unexpected lookup") } onFallback: { _ in }
         precondition(requests.count == 2)
         do {
-            _ = try StoreDownloadProtocol.packageItem(stillEmpty, bundleID: "example.app")
+            _ = try StoreDownloadProtocol.packageItem(stillEmpty.response, bundleID: "example.app")
             fatalError("Accepted an empty package list")
         } catch StoreDownloadError.empty {}
         do {
@@ -74,7 +74,7 @@ struct DownloadProtocolChecks {
             fatalError("Lost numeric failure code")
         } catch StoreDownloadError.rejected("9610", "License required") {}
 
-        for endpoint in [StoreDownloadProtocol.Endpoint.volumeStore, .redownload] {
+        for endpoint in [StoreDownloadProtocol.Endpoint.volumeStore, .redownload, .update] {
             let data = try PropertyListSerialization.data(fromPropertyList: StoreDownloadProtocol.payload(endpoint: endpoint, appID: 123,
                                                                                                           guid: "synthetic", version: "456"), format: .xml, options: 0)
             let payload = StoreProtocol.plist(data)!
@@ -85,6 +85,7 @@ struct DownloadProtocolChecks {
 
         let primary = "https://p25-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/volumeStoreDownloadProduct"
         for url in [primary, "https://downloaddispatch.itunes.apple.com/r/redownload?guid=fixture",
+                    "https://downloaddispatch.itunes.apple.com/up/updateProduct?guid=fixture",
                     "https://p71-buy.itunes.apple.com/WebObjects/MZFinance.woa/wa/redownloadProduct"]
         {
             _ = try StoreDownloadProtocol.validatedURL(URL(string: url)!)
@@ -140,6 +141,90 @@ struct DownloadProtocolChecks {
             ]]]], bundleID: "example.app", version: "123")
             fatalError("Accepted a different historical version")
         } catch StoreDownloadError.invalidPackage {}
+
+        // iOS draws the third update endpoint when redownload stays empty;
+        // tvOS keeps the two-step chain.
+        let updateSuccess: [String: Any] = ["songList": [["metadata": [
+            "softwareVersionBundleId": "example.app", "softwareVersionExternalIdentifier": "890598805", "itemId": 123,
+        ]]]]
+        for (ios, expectsUpdate) in [(true, true), (false, false)] {
+            requests = []
+            let outcome = try await StoreDownloadProtocol.fetchWithFallback(platformIsIOS: ios, version: nil) { endpoint, version in
+                requests.append((endpoint, version))
+                return empty
+            } resolveVersion: { "890598805" } onFallback: { _ in }
+            precondition(requests.count == (expectsUpdate ? 3 : 2))
+            precondition((outcome.endpoint == .update) == expectsUpdate)
+        }
+        requests = []
+        let updated = try await StoreDownloadProtocol.fetchWithFallback(platformIsIOS: true, version: nil) { endpoint, version in
+            requests.append((endpoint, version))
+            return endpoint == .volumeStore ? empty : updateSuccess
+        } resolveVersion: { "890598805" } onFallback: { _ in }
+        precondition(requests.map(\.0) == [.volumeStore, .redownload, .update])
+        precondition(updated.endpoint == .update)
+        _ = try StoreDownloadProtocol.packageItem(updated.response, bundleID: "example.app", version: "890598805", appID: 123)
+
+        // An empty HTTP 500 redownload still draws update once for iOS;
+        // other redownload failures keep their errors.
+        requests = []
+        let recovered = try await StoreDownloadProtocol.fetchWithFallback(platformIsIOS: true, version: nil) { endpoint, version in
+            requests.append((endpoint, version))
+            if endpoint == .volumeStore { return empty }
+            if endpoint == .redownload { throw StoreDownloadError.emptyRedownload }
+            return updateSuccess
+        } resolveVersion: { "890598805" } onFallback: { _ in }
+        precondition(requests.count == 3 && requests[2].0 == .update)
+        _ = try StoreDownloadProtocol.packageItem(recovered.response, bundleID: "example.app", version: "890598805", appID: 123)
+        requests = []
+        let rejectedRedownload = try await StoreDownloadProtocol.fetchWithFallback(platformIsIOS: true, version: "123") { endpoint, version in
+            requests.append((endpoint, version))
+            return endpoint == .volumeStore ? empty : ["failureType": 7777]
+        } resolveVersion: { fatalError("Unexpected lookup") } onFallback: { _ in }
+        precondition(requests.map(\.0) == [.volumeStore, .redownload])
+        do {
+            _ = try StoreDownloadProtocol.packageItem(rejectedRedownload.response, bundleID: "example.app")
+            fatalError("Accepted a rejected redownload")
+        } catch StoreDownloadError.rejected("7777", "") {}
+
+        // The update endpoint is tried exactly once; an empty update response
+        // surfaces instead of looping.
+        requests = []
+        let updateOutcome = try await StoreDownloadProtocol.fetchWithFallback(platformIsIOS: true, version: nil) { endpoint, version in
+            requests.append((endpoint, version))
+            return empty
+        } resolveVersion: { "890598805" } onFallback: { _ in }
+        precondition(requests.count == 3 && updateOutcome.endpoint == .update)
+        do {
+            _ = try StoreDownloadProtocol.packageItem(updateOutcome.response, bundleID: "example.app")
+            fatalError("Accepted an empty update response")
+        } catch StoreDownloadError.empty {}
+
+        // update responses must be a single app-matching item.
+        do {
+            _ = try StoreDownloadProtocol.packageItem(["songList": [["metadata": [
+                "softwareVersionBundleId": "example.app", "softwareVersionExternalIdentifier": "890598805", "itemId": 999,
+            ]]]], bundleID: "example.app", version: "890598805", appID: 123)
+            fatalError("Accepted another app's update item")
+        } catch StoreDownloadError.invalidPackage {}
+        do {
+            _ = try StoreDownloadProtocol.packageItem(["songList": [
+                ["metadata": ["softwareVersionBundleId": "example.app"]],
+                ["metadata": ["softwareVersionBundleId": "example.app"]],
+            ]], bundleID: "example.app", appID: 123)
+            fatalError("Accepted a multi-item update response")
+        } catch StoreDownloadError.invalidPackage {}
+
+        // "No Longer Available" promotes to the fallback chain.
+        let unavailable: [String: Any] = ["failureType": "", "customerMessage": "No Longer Available", "songList": []]
+        requests = []
+        _ = try await StoreDownloadProtocol.fetchWithFallback(platformIsIOS: true, version: nil) { endpoint, version in
+            requests.append((endpoint, version))
+            return endpoint == .volumeStore ? unavailable : updateSuccess
+        } resolveVersion: { "890598805" } onFallback: { precondition($0 == "unavailable-message") }
+        precondition(requests.map(\.0) == [.volumeStore, .redownload, .update])
+        precondition(StoreDownloadProtocol.fallbackReason(["customerMessage": "This app is no longer available", "songList": []]) == "unavailable-message")
+        precondition(StoreDownloadProtocol.fallbackReason(["customerMessage": "Some other message", "songList": []]) == nil)
 
         // Ignore extension/Watch metadata; validate the main IPA's actual platform.
         precondition(StoreDownloadProtocol.isMainInfoPlist("Payload/Example.app/Info.plist"))

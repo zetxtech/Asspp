@@ -61,9 +61,10 @@ enum StoreDownloadService {
         do {
             let region = Configuration.countryCode(for: account.store)
             var effectiveVersion = version
-            let response = try await StoreDownloadProtocol.fetchWithFallback(version: version) { endpoint, requestedVersion in
+            let platformIsIOS = platform == .iPhone || platform == .iPad
+            let outcome = try await StoreDownloadProtocol.fetchWithFallback(platformIsIOS: platformIsIOS, version: version) { fetchEndpoint, requestedVersion in
                 effectiveVersion = requestedVersion
-                return try await fetch(session: session, endpoint: endpoint, account: &account,
+                return try await fetch(session: session, endpoint: fetchEndpoint, account: &account,
                                        appID: app.id, version: requestedVersion, trace: trace)
             } resolveVersion: {
                 // An unpinned redownload can return a tvOS build for an iOS app.
@@ -81,15 +82,17 @@ enum StoreDownloadService {
                 logger.info("Store download [\(trace)]: catalog version=\(metadata.externalVersionID)")
                 return metadata.externalVersionID
             } onFallback: { reason in
-                logger.info("Store download [\(trace)]: trying redownload, reason=\(reason)")
+                logger.info("Store download [\(trace)]: trying fallback, reason=\(reason)")
             }
+            let response = outcome.response
             // Preserve the existing UI's explicit free-license acquisition flow.
             if StoreDownloadProtocol.failureCode(response) == "9610" {
                 throw ApplePackageError.licenseRequired
             }
-            let item = try StoreDownloadProtocol.packageItem(response, bundleID: app.bundleID, version: effectiveVersion)
+            let item = try StoreDownloadProtocol.packageItem(response, bundleID: app.bundleID,
+                                                             version: effectiveVersion, appID: outcome.endpoint == .update ? app.id : nil)
             let result = try parse(item)
-            logger.info("Store download [\(trace)]: product metadata ready")
+            logger.info("Store download [\(trace)]: product metadata ready, endpoint=\(outcome.endpoint.rawValue)")
             return result
         } catch {
             // localizedDescription and NSError.userInfo can contain Apple messages
@@ -162,7 +165,14 @@ enum StoreDownloadService {
             if let plist {
                 logger.info("Store download [\(trace)]: \(StoreDownloadProtocol.summary(plist))")
             }
-            guard response.statusCode == 200, let plist else { throw StoreDownloadError.response(response.statusCode) }
+            guard response.statusCode == 200, let plist else {
+                // ipatool's update fallback triggers on the empty HTTP 500 of
+                // the redownload endpoint; other failures keep their errors.
+                if endpoint == .redownload, response.statusCode == 500, data.isEmpty {
+                    throw StoreDownloadError.emptyRedownload
+                }
+                throw StoreDownloadError.response(response.statusCode)
+            }
             return plist
         }
         throw StoreDownloadError.invalidRedirect
