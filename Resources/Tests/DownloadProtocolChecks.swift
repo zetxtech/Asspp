@@ -218,11 +218,13 @@ struct DownloadProtocolChecks {
         // "No Longer Available" promotes to the fallback chain.
         let unavailable: [String: Any] = ["failureType": "", "customerMessage": "No Longer Available", "songList": []]
         requests = []
+        var fallbackReasons: [String] = []
         _ = try await StoreDownloadProtocol.fetchWithFallback(platformIsIOS: true, version: nil) { endpoint, version in
             requests.append((endpoint, version))
             return endpoint == .update ? updateSuccess : unavailable
-        } resolveVersion: { "890598805" } onFallback: { precondition($0 == "unavailable-message") }
+        } resolveVersion: { "890598805" } onFallback: { fallbackReasons.append($0) }
         precondition(requests.map(\.0) == [.volumeStore, .redownload, .update])
+        precondition(fallbackReasons == ["unavailable-message", "update-after-unavailable-message"])
         precondition(StoreDownloadProtocol.fallbackReason(["customerMessage": "This app is no longer available", "songList": []]) == "unavailable-message")
         precondition(StoreDownloadProtocol.fallbackReason(["customerMessage": "Some other message", "songList": []]) == nil)
 
