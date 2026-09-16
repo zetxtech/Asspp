@@ -159,7 +159,7 @@ struct DownloadProtocolChecks {
         requests = []
         let updated = try await StoreDownloadProtocol.fetchWithFallback(platformIsIOS: true, version: nil) { endpoint, version in
             requests.append((endpoint, version))
-            return endpoint == .volumeStore ? empty : updateSuccess
+            return endpoint == .update ? updateSuccess : empty
         } resolveVersion: { "890598805" } onFallback: { _ in }
         precondition(requests.map(\.0) == [.volumeStore, .redownload, .update])
         precondition(updated.endpoint == .update)
