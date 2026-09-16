@@ -63,8 +63,9 @@ int main() {
         assert(uc_mem_map(engine, heap, 64 * 1024 * 1024, UC_PROT_ALL) == UC_ERR_OK);
         assert(uc_mem_map(engine, stack, 4096, UC_PROT_ALL) == UC_ERR_OK);
         assert(uc_mem_map(engine, stop, 4096, UC_PROT_ALL) == UC_ERR_OK);
-        SapShims shims(engine, {}, {}, {2, 0x41, 0x53, 0x53, 0x50, 0x50});
+        SapShims shims(engine, {{"_get_mac_address", 0x12340000}}, {}, {2, 0x41, 0x53, 0x53, 0x50, 0x50});
         shims.SetHeap(heap, 64 * 1024 * 1024);
+        assert(shims.Resolve("_get_mac_address") == 0x12340000);
         auto invoke = [&](const char* name, std::initializer_list<uint64_t> args) {
             shims.BeforeInvoke();
             const uint64_t entry = shims.Resolve(name);

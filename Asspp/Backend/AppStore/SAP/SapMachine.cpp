@@ -306,12 +306,12 @@ void SapShims::CoalesceFreeBlocks() {
 
 uint64_t SapShims::Resolve(std::string_view name) {
     std::string key(name);
+    // Real cross-image exports
+    auto ce = coreExports_.find(key);
+    if (ce != coreExports_.end()) return ce->second;
+
     auto it = symbols_.find(key);
     if (it != symbols_.end()) return it->second;
-
-    // CoreFP real exports
-    auto ce = coreExports_.find(key);
-    if (ce != coreExports_.end()) { symbols_[key] = ce->second; return ce->second; }
 
     // Resolve unused imports lazily, but never pretend an unsupported call succeeded.
     return AddFunction(key, [key]() { throw std::runtime_error("unsupported SAP import: " + key); });
@@ -683,13 +683,11 @@ std::unique_ptr<SapMachine> SapMachine::Create(
         "_dku592fbFAj",     "_fdjkDSAFjklaf2s", "_lxpgvVMLd0S7uRl",
     };
     std::unordered_map<std::string, uint64_t> coreFPExports;
-    for (const char* n : kCoreFPExportNames) {
-        try { coreFPExports[n] = imgCoreFP->Export(n, kCoreFPBase); } catch (...) {}
-    }
-    try { coreFPExports["_get_mac_address"] = imgCommerceCore->Export("_get_mac_address", kCommerceBase); }
-    catch (...) {}
+    for (const char* n : kCoreFPExportNames)
+        coreFPExports[n] = imgCoreFP->Export(n, kCoreFPBase);
+    coreFPExports["_get_mac_address"] = imgCommerceCore->Export("_get_mac_address", kCommerceBase);
 
-    // 5. Create shims — pass hardwareID so _get_mac_address shim returns correct MAC
+    // 5. Create shims
     m->shims_ = std::make_unique<SapShims>(m->uc_, std::move(coreFPExports), std::move(coreFPIcxs), std::move(hardwareID));
     m->shims_->SetHeap(kHeapBase, kHeapSize);
 
