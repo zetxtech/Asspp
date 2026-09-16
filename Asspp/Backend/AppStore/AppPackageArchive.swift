@@ -64,7 +64,7 @@ class AppPackageArchive {
         self.region = region
         self.package = package
 
-let packageIdentifier = [package.id, package.software.bundleID.lowercased(), region, (package.entityType ?? .iPhone).rawValue]
+        let packageIdentifier = [package.id, package.software.bundleID.lowercased(), region, (package.entityType ?? .iPhone).rawValue]
             .joined()
             .lowercased()
         _versionItems = Persist(key: "\(packageIdentifier).versions", defaultValue: [:])
@@ -98,7 +98,7 @@ let packageIdentifier = [package.id, package.software.bundleID.lowercased(), reg
         Task {
             do {
                 let versions = try await AppStore.this.withAccount(id: accountIdentifier) { userAccount in
-try await StoreDownloadService.versions(account: &userAccount.account, package: requestedPackage)
+                    try await StoreDownloadService.versions(account: &userAccount.account, package: requestedPackage)
                 }
                 self.versionIdentifiers = versions.reversed()
             } catch {
