@@ -220,7 +220,7 @@ struct DownloadProtocolChecks {
         requests = []
         _ = try await StoreDownloadProtocol.fetchWithFallback(platformIsIOS: true, version: nil) { endpoint, version in
             requests.append((endpoint, version))
-            return endpoint == .volumeStore ? unavailable : updateSuccess
+            return endpoint == .update ? updateSuccess : unavailable
         } resolveVersion: { "890598805" } onFallback: { precondition($0 == "unavailable-message") }
         precondition(requests.map(\.0) == [.volumeStore, .redownload, .update])
         precondition(StoreDownloadProtocol.fallbackReason(["customerMessage": "This app is no longer available", "songList": []]) == "unavailable-message")
