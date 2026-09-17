@@ -65,6 +65,11 @@ struct AuthenticationProtocolChecks {
         }
         // Never retry a parsed rejection even when the HTTP layer says 5xx.
         precondition(!StoreAuthenticationProtocol.retryable(status: 500, data: binary))
+        // NSError bridging assigns declaration-order indices; pin the two triage
+        // codes so `StoreDiagnostics.errorSummary` output stays unambiguous.
+        precondition((StoreAuthenticationError.signingFailed as NSError).code == 5)
+        precondition((StoreAuthenticationError.rejected("fixture", "fixture") as NSError).code == 6)
+        precondition((StoreAuthenticationError.serviceResponse(403) as NSError).code == 4)
         print("Authentication protocol regression checks passed.")
     }
 }
