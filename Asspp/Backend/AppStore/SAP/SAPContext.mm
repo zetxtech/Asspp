@@ -4,12 +4,17 @@
 
 static std::vector<uint8_t> ReadVerifiedAsset(NSURL *root, NSString *name, NSUInteger size, NSString *hash) {
     NSData *data = [NSData dataWithContentsOfURL:[root URLByAppendingPathComponent:name]];
-    if (data.length != size) throw std::runtime_error("Missing or truncated SAP assets. Rebuild the app.");
+    if (data.length != size)
+        throw std::runtime_error("SAP asset " + std::string(name.UTF8String) + " has size " +
+                                 std::to_string(static_cast<unsigned long long>(data.length)) +
+                                 ", expected " + std::to_string(static_cast<unsigned long long>(size)) +
+                                 ". Rebuild or reinstall the app.");
     unsigned char digest[CC_SHA256_DIGEST_LENGTH];
     CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
     NSMutableString *actual = [NSMutableString string];
     for (unsigned char byte : digest) [actual appendFormat:@"%02x", byte];
-    if (![actual isEqualToString:hash]) throw std::runtime_error("SAP asset integrity check failed. Rebuild the app.");
+    if (![actual isEqualToString:hash])
+        throw std::runtime_error("SAP asset " + std::string(name.UTF8String) + " failed SHA-256 verification. Rebuild or reinstall the app.");
     auto bytes = static_cast<const uint8_t *>(data.bytes);
     return {bytes, bytes + data.length};
 }
