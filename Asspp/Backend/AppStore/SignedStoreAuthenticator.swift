@@ -31,7 +31,9 @@ actor SignedStoreAuthenticator {
         defer { session.invalidateAndCancel() }
         do {
             return try await performAuthentication(email: email, password: password, code: code, guid: guid, cookies: cookies)
-        } catch where (error as NSError).domain == "Asspp.SAP" {
+        } catch let signerError as NSError where signerError.domain == "Asspp.SAP" {
+            // SAP exceptions are fixed diagnostic strings; they never carry credentials, signatures, cookies, or URLs.
+            logger.error("SAP signer failed: \(signerError.localizedDescription)")
             throw StoreAuthenticationError.signingFailed
         }
     }
