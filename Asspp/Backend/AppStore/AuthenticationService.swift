@@ -65,8 +65,18 @@ extension AppStore {
 
     // Apple's customerMessage can echo the account identifier, so keep only the failure code in logs.
     private func logAuthenticationError(_ error: Error, action: String) {
-        if case let StoreAuthenticationError.rejected(code, _) = error {
-            logger.error("\(action) rejected: failureCode=\(code)")
+        if let auth = error as? StoreAuthenticationError {
+            let detail: String
+            switch auth {
+            case .rejected:
+                detail = "rejected"
+            case let .serviceResponse(status):
+                detail = "serviceResponse(\(status))"
+            default:
+                detail = String(describing: auth)
+            }
+            logger.error("\(action) failed: type=StoreAuthenticationError case=\(detail) code=\((error as NSError).code)")
+            return
         }
         logger.error("\(action) failed: \(StoreDiagnostics.errorSummary(error))")
     }
