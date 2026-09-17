@@ -33,7 +33,7 @@ extension AppStore {
             logger.info("authentication successful for user")
             return userAccount
         } catch {
-            logger.error("authentication failed: \(StoreDiagnostics.errorSummary(error))")
+            logAuthenticationError(error, action: "authentication")
             throw error
         }
     }
@@ -58,8 +58,16 @@ extension AppStore {
             logger.info("account rotation successful")
             return updatedAccount
         } catch {
-            logger.error("account rotation failed: \(StoreDiagnostics.errorSummary(error))")
+            logAuthenticationError(error, action: "account rotation")
             throw error
         }
+    }
+
+    // Apple's customerMessage can echo the account identifier, so keep only the failure code in logs.
+    private func logAuthenticationError(_ error: Error, action: String) {
+        if case let StoreAuthenticationError.rejected(code, _) = error {
+            logger.error("\(action) rejected: failureCode=\(code)")
+        }
+        logger.error("\(action) failed: \(StoreDiagnostics.errorSummary(error))")
     }
 }
