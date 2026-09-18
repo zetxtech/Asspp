@@ -45,6 +45,14 @@ verified assets and the pinned source. Apple binaries are not committed here.
 The app bundle includes approximately 38 MB of Apple SAP data, plus the interpreter and its pinned source archive.
 The data files are interpreted; they are not loaded as native dynamic libraries.
 
+The four assets ship inside a single opaque container file, `SAPAssets.bin`,
+packed by `prepare.sap.py` with the same length and SHA-256 verification used
+for the raw files. Side-loading tools that re-sign every 64-bit Mach-O inside
+the app bundle (for example LiveContainer) treat each raw asset as a native
+binary and rewrite it, which breaks the verified bytes. The packed container
+starts with a non-Mach-O magic so installers leave it untouched; the runtime
+unpacks it and re-verifies every asset before use.
+
 ## Regression checks
 
 Run the regression suite on macOS:

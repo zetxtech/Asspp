@@ -5,6 +5,7 @@ import io
 from pathlib import Path
 import tempfile
 import unittest
+import unittest.mock
 
 spec = importlib.util.spec_from_file_location("sap_build", Path(__file__).parents[1] / "Scripts/prepare.sap.py")
 sap = importlib.util.module_from_spec(spec)
@@ -44,6 +45,42 @@ class SAPBuildChecks(unittest.TestCase):
             sap.atomic_write(path, b"invalid fixture!")
             self.assertFalse(sap.valid_asset(path, expected))
             self.assertEqual(list(Path(directory).iterdir()), [path])
+
+    def test_container_magic_never_looks_like_macho(self):
+        self.assertNotIn(sap.CONTAINER_MAGIC[:4], (b"\xca\xfe\xba\xbe", b"\xcf\xfa\xed\xfe", b"\xfe\xed\xfa\xcf"))
+        self.assertEqual(len(sap.CONTAINER_MAGIC), 9)
+
+    def test_pack_assets_roundtrip_preserves_verified_bytes(self):
+        fake = {'A': (3, hashlib.sha256(b'abc').hexdigest()),
+                'B.bin': (5, hashlib.sha256(b'hello').hexdigest())}
+        payloads = {'A': b'abc', 'B.bin': b'hello'}
+        with tempfile.TemporaryDirectory() as directory, unittest.mock.patch.object(sap, 'ASSETS', fake):
+            root = Path(directory)
+            for name, spec in fake.items():
+                sap.atomic_write(root / name, payloads[name])
+                self.assertTrue(sap.valid_asset(root / name, spec))
+            blob = sap.pack_assets(root)
+        self.assertTrue(blob.startswith(sap.CONTAINER_MAGIC))
+        cursor = len(sap.CONTAINER_MAGIC)
+        for name in ('A', 'B.bin'):
+            (name_length,) = __import__('struct').unpack('>I', blob[cursor:cursor + 4])
+            cursor += 4
+            self.assertEqual(blob[cursor:cursor + name_length].decode(), name)
+            cursor += name_length
+            (data_length,) = __import__('struct').unpack('>Q', blob[cursor:cursor + 8])
+            cursor += 8
+            expected = payloads[name]
+            self.assertEqual(data_length, len(expected))
+            self.assertEqual(blob[cursor:cursor + data_length], expected)
+            cursor += data_length
+        self.assertEqual(cursor, len(blob))
+
+    def test_pack_assets_rejects_unverified_assets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "CoreFP").write_bytes(b"tampered")
+            with self.assertRaises(RuntimeError):
+                sap.pack_assets(root)
 
 
 if __name__ == "__main__":

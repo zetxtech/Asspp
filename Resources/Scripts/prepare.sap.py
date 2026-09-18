@@ -31,6 +31,10 @@ ASSETS = {
     'CoreFP.icxs': (5288352, '473e78af86979f5bd4f6269561caf770b3d16c098d918846eeac8cdd2fe6566a'),
 }
 
+# Container magic. Must never collide with a Mach-O magic so side-loaders that
+# re-sign every 64-bit Mach-O inside the bundle leave the packed assets alone.
+CONTAINER_MAGIC = b'ASSPBIN1\0'
+
 
 def valid_asset(path, spec):
     return path.is_file() and path.stat().st_size == spec[0] and hashlib.sha256(path.read_bytes()).hexdigest() == spec[1]
@@ -200,9 +204,10 @@ def prepare_build(root):
         temporary.unlink()
     resources = Path(os.environ['TARGET_BUILD_DIR']) / os.environ['UNLOCALIZED_RESOURCES_FOLDER_PATH'] / 'SAPAssets'
     resources.mkdir(parents=True, exist_ok=True)
-    for name in ASSETS:
-        if not valid_asset(resources / name, ASSETS[name]):
-            shutil.copy2(assets / name, resources / name)
+    # Pack the Mach-O assets into one opaque container so side-loaders that
+    # re-sign every 64-bit Mach-O in the bundle cannot rewrite them. The packed
+    # blob is verified with the same size + SHA-256 checks at runtime.
+    write_container(assets, resources / 'SAPAssets.bin')
     # Ship the exact interpreter source alongside its license notices.
     source_archive = resources / 'Unicorn-source.tar.gz'
     if not source_archive.is_file() or hashlib.sha256(source_archive.read_bytes()).hexdigest() != ARCHIVE_SHA256:
@@ -212,6 +217,27 @@ def prepare_build(root):
         target = resources / path.name
         if not target.is_file() or target.read_bytes() != path.read_bytes():
             shutil.copy2(path, target)
+
+
+def pack_assets(directory):
+    """Serialize all verified assets into one opaque container blob."""
+    payload = bytearray()
+    for name, spec in ASSETS.items():
+        path = Path(directory) / name
+        if not valid_asset(path, spec):
+            raise RuntimeError(f'Cannot pack unverified SAP asset: {name}')
+        data = path.read_bytes()
+        payload += struct.pack('>I', len(name.encode()))
+        payload += name.encode()
+        payload += struct.pack('>Q', len(data))
+        payload += data
+    return CONTAINER_MAGIC + bytes(payload)
+
+
+def write_container(directory, target):
+    blob = pack_assets(directory)
+    atomic_write(Path(target), blob)
+    return blob
 
 
 def main():
