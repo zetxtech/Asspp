@@ -63,6 +63,7 @@ actor SignedStoreAuthenticator {
               let assets = Bundle.main.resourceURL?.appendingPathComponent("SAPAssets"),
               guid.count == 12
         else { throw StoreAuthenticationError.invalidConfiguration }
+        logger.info("SAP config: cert=\(certificateURL.absoluteString), setup=\(setupURL.absoluteString), auth=\(endpoint.absoluteString), guid=\(guid)")
         let hardware = stride(from: 0, to: 12, by: 2).compactMap { offset -> UInt8? in
             let start = guid.index(guid.startIndex, offsetBy: offset)
             return UInt8(guid[start ..< guid.index(start, offsetBy: 2)], radix: 16)
@@ -73,7 +74,9 @@ actor SignedStoreAuthenticator {
         guard certificateResponse.statusCode == 200,
               let certificate = StoreProtocol.plist(certificateData)?["sign-sap-setup-cert"] as? Data
         else { throw StoreAuthenticationError.serviceResponse(certificateResponse.statusCode) }
+        logger.info("SAP exchange: setup-cert received (\(certificate.count) bytes), running guest")
         let exchange = try signer.exchangeData(certificate, version: 200)
+        logger.info("SAP exchange: setup message ready (\(exchange.count) bytes)")
         var setup = URLRequest(url: setupURL)
         setup.httpMethod = "POST"
         setup.setValue("application/x-apple-plist", forHTTPHeaderField: "Content-Type")
@@ -83,6 +86,7 @@ actor SignedStoreAuthenticator {
               let reply = StoreProtocol.plist(setupData)?["sign-sap-setup-buffer"] as? Data
         else { throw StoreAuthenticationError.serviceResponse(setupResponse.statusCode) }
         _ = try signer.exchangeData(reply, version: 200)
+        logger.info("SAP exchange: setup reply processed, complete=\(signer.complete)")
         guard signer.complete else { throw StoreAuthenticationError.invalidConfiguration }
 
         var url = endpoint
@@ -155,9 +159,7 @@ actor SignedStoreAuthenticator {
         request.setValue(Locale.preferredLanguages.prefix(3).joined(separator: ", "), forHTTPHeaderField: "Accept-Language")
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw StoreAuthenticationError.serviceResponse(0) }
-        // Do not log bodies, signatures, URL query strings, or Set-Cookie headers.
-        let endpoint = response.url.map { "\($0.host ?? "")\($0.path)" } ?? "unknown"
-        logger.info("Apple authentication: \(request.httpMethod ?? "GET") \(endpoint) -> HTTP \(response.statusCode), \(data.count) bytes")
+        logExchange(request, data: data, response: response)
         return (data, response)
     }
 
@@ -167,12 +169,48 @@ actor SignedStoreAuthenticator {
             // Retry the identical body with a fresh signature, as ipatool does.
             try signedRequest.setValue(signer.sign(request.httpBody ?? Data()).base64EncodedString(), forHTTPHeaderField: "X-Apple-ActionSignature")
             let result = try await send(signedRequest)
-            if attempt == 3 || !StoreAuthenticationProtocol.retryable(status: result.1.statusCode, data: result.0) {
+            let retry = attempt < 3 && StoreAuthenticationProtocol.retryable(status: result.1.statusCode, data: result.0)
+            logger.info("SAP signer: attempt \(attempt)/3 -> HTTP \(result.1.statusCode), willRetry=\(retry)")
+            if !retry {
                 return result
             }
             try await Task.sleep(for: .milliseconds(attempt * 250))
         }
         throw StoreAuthenticationError.tooManyAttempts
+    }
+
+    /// Full exchange diagnostics. Logs method, absolute URL, status, size, content
+    /// type, key response headers, cookie names and the body of unstructured or
+    /// failed responses. Request bodies, signatures and Set-Cookie values are never logged.
+    private func logExchange(_ request: URLRequest, data: Data, response: HTTPURLResponse) {
+        var line = "Apple authentication: \(request.httpMethod ?? "GET") \(request.url?.absoluteString ?? "?")"
+        line += " -> HTTP \(response.statusCode), \(data.count) bytes"
+        if let type = response.value(forHTTPHeaderField: "Content-Type") {
+            line += ", type=\(type)"
+        }
+        let interesting = ["Location", "X-Apple-Store-Front", "pod", "Server",
+                           "Apple-Originating-System", "X-Apple-Request-Uuid"]
+        for key in interesting {
+            if let value = response.value(forHTTPHeaderField: key) {
+                line += ", \(key)=\(value)"
+            }
+        }
+        let cookieNames = (response.value(forHTTPHeaderField: "Set-Cookie") ?? "")
+            .split(separator: ",")
+            .compactMap { $0.split(separator: ";").first?.trimmingCharacters(in: .whitespaces) }
+        if !cookieNames.isEmpty {
+            line += ", Set-Cookie=[\(cookieNames.joined(separator: ", "))]"
+        }
+        if response.statusCode >= 400 || StoreProtocol.plist(data) == nil {
+            let snippet = data.prefix(512)
+            if let text = String(data: snippet, encoding: .utf8), !text.isEmpty {
+                let flushed = text.replacingOccurrences(of: "\n", with: "\\n")
+                line += ", body=\(flushed.prefix(600))"
+            } else if !snippet.isEmpty {
+                line += ", bodyHex=\(snippet.map { String(format: "%02x", $0) }.joined())"
+            }
+        }
+        logger.info("\(line)")
     }
 
     private func publicSAPURL(_ value: Any?, host: String) -> URL? {
