@@ -156,7 +156,8 @@ actor SignedStoreAuthenticator {
         let (data, response) = try await session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw StoreAuthenticationError.serviceResponse(0) }
         // Do not log bodies, signatures, URL query strings, or Set-Cookie headers.
-        logger.info("Apple authentication: HTTP \(response.statusCode), \(data.count) bytes")
+        let endpoint = response.url.map { "\($0.host ?? "")\($0.path)" } ?? "unknown"
+        logger.info("Apple authentication: \(request.httpMethod ?? "GET") \(endpoint) -> HTTP \(response.statusCode), \(data.count) bytes")
         return (data, response)
     }
 
