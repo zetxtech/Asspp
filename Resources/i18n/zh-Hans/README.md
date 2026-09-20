@@ -8,6 +8,15 @@ Asspp 专为需要管理**多个 Apple ID** 和**跨区下载**的用户打造�
 
 ![Preview](../../../Resources/Screenshots/Apptisan_Asspp.png)
 
+## ℹ️ 关于本分支
+
+本分支修复了登录与下载，旁加载后也能正常使用：
+
+- **登录修复**：恢复 Apple 账号签名认证，登录和下载稳定可靠。
+- **旁加载友好**：通过 LiveContainer、TrollStore、AltStore 等工具安装后认证不再损坏，不再出现「本地认证签名失败」之类的错误。
+
+**致谢**：感谢原作者 [Lakr](https://github.com/Lakr233) 及 [Asspp](https://github.com/Lakr233/Asspp) 的全部贡献者；同时感谢 [Majd Alfhaily](https://github.com/majd) 与上游 [ipatool](https://github.com/majd/ipatool) 提供的 SAP 签名认证实现。
+
 ## ✨ 核心亮点
 
 - **🌍 全球商店漫游**：想看美区、日区还是国区的应用？一键切换，即刻浏览。告别繁琐的换区流程。

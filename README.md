@@ -8,6 +8,15 @@ Asspp is a powerful client designed for users who need to manage **multiple Appl
 
 ![Preview](./Resources/Screenshots/Apptisan_Asspp.png)
 
+## ℹ️ Fork Notes
+
+This fork keeps sign-in and downloads working with Apple's current authentication, including after side-loading:
+
+- **Login fixed**: signed Apple account authentication is restored, so login and downloads work reliably.
+- **Side-loading friendly**: installation via LiveContainer, TrollStore, AltStore or similar tools no longer breaks authentication. No more "authentication signature failed" errors.
+
+**Gratitude**: Thanks to the original author [Lakr](https://github.com/Lakr233) and all contributors of [Asspp](https://github.com/Lakr233/Asspp), and to [Majd Alfhaily](https://github.com/majd) and the upstream [ipatool](https://github.com/majd/ipatool) for the SAP signing work this fork builds upon.
+
 ## ✨ Why Asspp?
 
 - **🌍 Multi-Region Access**: Browse and search the US, Japan, China, or any other App Store region seamlessly. No more switching system accounts just to check an app.
